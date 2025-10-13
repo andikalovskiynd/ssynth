@@ -7,7 +7,7 @@ class Filter:
             raise ValueError("Unknown filter type")
         
         self.filter_type = filter_type
-        self.lib = ctypes.CDLL('/Users/cyrep/Documents/python/ssynth/Filter/Compiled/libfilter.so')
+        self.lib = ctypes.CDLL('./Filter/Compiled/libfilter.so')
         self.prev_y = np.array([0.0], dtype=np.float32)
 
         if filter_type == 'lpf':
@@ -20,7 +20,7 @@ class Filter:
             ctypes.POINTER(ctypes.c_float),     # x
             ctypes.POINTER(ctypes.c_float),     # y
             ctypes.c_int,                       # N
-            ctypes.c_float,                     # alpha (value, not pointer)
+            ctypes.c_float,                     # alpha 
             ctypes.POINTER(ctypes.c_float)      # prev_y
         ]
         self.func.restype = None
