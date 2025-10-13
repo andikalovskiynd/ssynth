@@ -6,12 +6,14 @@ import math
 # ================================
 
 class Oscillator:
-    def __init__(self, wave_type='sine', freq=440.0, amplitude=1.0, sample_rate=44100):
+    def __init__(self, wave_type='sine', freq=440.0, amplitude=1.0, sample_rate=44100, detune=0.0, phase_offset=0.0):
         self.wave_type = wave_type
         self.freq = freq
         self.amplitude = amplitude
         self.sample_rate = sample_rate
         self.phase = 0.0    # normalized phase in [0.0, 1.0)
+        self.detune = detune
+        self.phase_offset = phase_offset
     
     def process(self, num_frames: int):
         """ 
@@ -22,10 +24,10 @@ class Oscillator:
         """
 
         # phase increment per sample (fraction of cycle)
-        phase_inc = self.freq / self.sample_rate
+        phase_inc = (self.freq + self.detune) / self.sample_rate
 
         # array of phases for each sample
-        phases = (self.phase + phase_inc * np.arange(num_frames)) % 1.0
+        phases = (self.phase + self.phase_offset + phase_inc * np.arange(num_frames)) % 1.0
 
         if self.wave_type == 'sine':
             out = np.sin(2 * np.pi * phases)   # x[n] = A * sin (2pi * ph_n), ph_n in [0,1)
@@ -63,6 +65,7 @@ class Voice:
             Oscillator(freq=freq, sample_rate=sample_rate)
         ]
         self.is_active = True
+        self.pan = 0.0  # -1.0 = left; 0.0 = center; 1.0 = right
     
     def set_waveforms(self, waveforms):
         """ Set waveform for each osc """
@@ -74,13 +77,28 @@ class Voice:
         for osc, amp in zip(self.oscillators, amps):
             osc.amplitude = amp
 
+    def set_pan(self, pan):
+        """ Set panoram """
+        self.pan = np.clip(pan, -1.0, 1.0)
+
     def process(self, num_frames):
-        """ Sum signals from all of oscs """
+        """ Sum signals from all of oscs depending on panoram """
         if not self.is_active:
             return np.zeros(num_frames)
-        mix = sum(osc.process(num_frames) for osc in self.oscillators)
-        return mix / len(self.oscillators)
-    
+        
+        # mix = sum(osc.process(num_frames) for osc in self.oscillators)
+        # return mix / len(self.oscillators)
+
+        mono = sum(osc.process(num_frames) for osc in self.oscillators)
+        mono /= len(self.oscillators)
+
+        # balanced stereo gain
+        left_gain = np.cos((np.pi / 4) * (1 + self.pan))
+        right_gain = np.sin((np.pi / 4) * (1 + self.pan))
+
+        stereo = np.stack([mono * left_gain, mono * right_gain], axis=-1)
+        return stereo
+
 
 # ================================
 # =         Voice Engine         =
@@ -88,10 +106,11 @@ class Voice:
     
 class VoiceEngine:
     """ Manages active voices """
-    def __init__(self, max_voices=8, sample_rate=44100):
+    def __init__(self, max_voices=8, sample_rate=44100, master_gain=1.0):
         self.voices = []
         self.max_voices = max_voices
         self.sample_rate = sample_rate 
+        self.master_gain = master_gain
 
     def note_on(self, freq):
         """ Add new voice """
@@ -111,4 +130,4 @@ class VoiceEngine:
         if not self.voices:
             return np.zeros(num_frames)
         mix = sum(v.process(num_frames) for v in self.voices)
-        return mix / len(self.voices)
+        return (mix / len(self.voices)) * self.master_gain
