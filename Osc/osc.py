@@ -1,12 +1,23 @@
 import numpy as np 
 import math 
+import sys
+
+sys.path.append("/Users/cyrep/Documents/python/ssynth/build")
+
+try:
+    import wavetable_cpp
+    WAVETABLE_AVAILABLE = True
+    wavetable_cpp.init(44100)
+except Exception:
+    WAVETABLE_AVAILABLE = False
+    print("WAVETABLE IS NOT IMPORTED")
 
 # ================================
 # =         Oscillator           =
 # ================================
 
 class Oscillator:
-    def __init__(self, wave_type='sine', freq=440.0, amplitude=1.0, sample_rate=44100, detune=0.0, phase_offset=0.0):
+    def __init__(self, wave_type='sine', freq=440.0, amplitude=1.0, sample_rate=44100, detune=0.0, phase_offset=0.0, table_size = 4096):
         self.wave_type = wave_type
         self.freq = freq
         self.amplitude = amplitude
@@ -14,17 +25,39 @@ class Oscillator:
         self.phase = 0.0    # normalized phase in [0.0, 1.0)
         self.detune = detune
         self.phase_offset = phase_offset
+        self.table_size = table_size
+
+        if WAVETABLE_AVAILABLE:
+            # to ensure that table exists for this waveform name
+            try:
+                wavetable_cpp.init(self.sample_rate)
+                wavetable_cpp.generate_table(self.wave_type, self.table_size)
+            except Exception:
+                pass
     
     def process(self, num_frames: int):
+        # phase increment per sample (fraction of cycle)
+        phase_inc = (self.freq + self.detune) / self.sample_rate
+
+        if WAVETABLE_AVAILABLE:
+            try:
+                start_phase = self.phase + self.phase_offset
+                arr = wavetable_cpp.render(self.wave_type, float(start_phase), float(phase_inc), int(num_frames), float(self.amplitude), float(0.0))
+                self.phase = (self.phase + phase_inc * num_frames) % 1.0
+                print("\n   WAVETABLE IS AVAILABLE AT PROCESS")
+                return arr
+            except Exception:
+                # fallback to origin full python code
+                print("\n FAILBACK ON PROCESS IN OSC!!!")
+                pass
+
         """ 
+        IF WAVE TABLE IS NOT AVAILABLE
         Generates array with num_frames samples
             It is practically convinient to keep phase not in seconds but in normalized form, 
             in [0,1) as fraction of cycle. So every step is: dph = f / f_s 
             And sine, for example is x[n] = Asin(2pi * ph_n), ph_n = ph_n-1 + dph.
         """
-
-        # phase increment per sample (fraction of cycle)
-        phase_inc = (self.freq + self.detune) / self.sample_rate
 
         # array of phases for each sample
         phases = (self.phase + self.phase_offset + phase_inc * np.arange(num_frames)) % 1.0

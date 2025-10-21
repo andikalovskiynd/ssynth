@@ -41,7 +41,10 @@ No usage yet.
 
 This project is licensed under the MIT License - see the LICENSE.md file for details.
 
+## Inspiration / Sources
+* [Wavetable Architecture](https://www.metafunction.co.uk/post/the-wavetable-synthesis-architecture)
+
 ## Contacts
 
-- tg: [cyrepoor](t.me/cyrepoor) 
+- tg: [cyrepoor](https://t.me/cyrepoor) 
 - mail: st131335@student.spbu.ru
