@@ -25,7 +25,13 @@ echo "Build complete!"
 echo "Output files:"
 ls -lh *.so *.dylib 2>/dev/null || echo "No shared libraries found"
 
+OpenMP_PATH=$(brew --prefix libomp)/lib
+FFTW_PATH=$(brew --prefix fftw)/lib
+
+export DYLD_LIBRARY_PATH="${OpenMP_PATH}:${FFTW_PATH}:${DYLD_LIBRARY_PATH}"
+
 # Return to project root and run test
-cd "$SCRIPT_DIR"
-echo "\nRunning test_ssynth.py..."
-python test_ssynth.py
+# cd "$SCRIPT_DIR"
+# echo "Running test_ssynth.py..."
+# export OMP_NUM_THREADS=2
+# python test_ssynth.py

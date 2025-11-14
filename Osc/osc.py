@@ -1,16 +1,26 @@
 import numpy as np 
 import math 
 import sys
+import os
 
-sys.path.append("/Users/cyrep/Documents/python/ssynth/build")
+CURRENT_FILE_DIR = os.path.dirname(os.path.abspath(__file__)) 
+PROJECT_ROOT = os.path.dirname(CURRENT_FILE_DIR) 
+BUILD_PATH = os.path.join(PROJECT_ROOT, "build")
+
+if BUILD_PATH not in sys.path:
+    sys.path.append(BUILD_PATH)
+
+print(f"DEBUG: BUILD_PATH added to sys.path: {BUILD_PATH}")
 
 try:
-    import wavetable_cpp
+    print(f"DEBUG: BUILD_PATH added to sys.path: {BUILD_PATH}")
+    import wavetable_cpp 
     WAVETABLE_AVAILABLE = True
     wavetable_cpp.init(44100)
-except Exception:
+except Exception as e:
     WAVETABLE_AVAILABLE = False
-    print("WAVETABLE IS NOT IMPORTED")
+    print(f"WAVETABLE IS NOT IMPORTED: {e}")
+
 
 # ================================
 # =         Oscillator           =
@@ -27,13 +37,19 @@ class Oscillator:
         self.phase_offset = phase_offset
         self.table_size = table_size
 
+        self.set_wave_type(wave_type)
+
+    def set_wave_type(self, wave_type: str):
+        self.wave_type = wave_type
+
         if WAVETABLE_AVAILABLE:
-            # to ensure that table exists for this waveform name
             try:
-                wavetable_cpp.init(self.sample_rate)
-                wavetable_cpp.generate_table(self.wave_type, self.table_size)
-            except Exception:
-                pass
+                if not wavetable_cpp.has_table(self.wave_type):
+                    print(f"Generating wavetable for: {self.wave_type}")
+                    wavetable_cpp.generate_table(self.wave_type, self.table_size)
+            
+            except Exception as e:
+                print(f"Wavetable generation error for {self.wave_type}:", e)
     
     def process(self, num_frames: int):
         # phase increment per sample (fraction of cycle)
@@ -103,7 +119,7 @@ class Voice:
     def set_waveforms(self, waveforms):
         """ Set waveform for each osc """
         for osc, wf in zip(self.oscillators, waveforms):
-            osc.wave_type = wf
+            osc.set_wave_type(wf)
     
     def set_amplitudes(self, amps):
         """ Set amplitude for each osc """
@@ -123,6 +139,9 @@ class Voice:
         # return mix / len(self.oscillators)
 
         mono = sum(osc.process(num_frames) for osc in self.oscillators)
+
+        if not isinstance(mono, np.ndarray):
+             return np.zeros((num_frames, 2))
         mono /= len(self.oscillators)
 
         # balanced stereo gain
@@ -161,6 +180,12 @@ class VoiceEngine:
     def process(self, num_frames):
         """ Sum signals from all of active voices """
         if not self.voices:
-            return np.zeros(num_frames)
-        mix = sum(v.process(num_frames) for v in self.voices)
+            return np.zeros((num_frames, 2))
+        
+        active_voices = [v for v in self.voices if v.is_active]
+        if not active_voices:
+            return np.zeros((num_frames, 2))
+
+        mix = sum(v.process(num_frames) for v in active_voices)
+        self.voices = active_voices 
         return (mix / len(self.voices)) * self.master_gain

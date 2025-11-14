@@ -31,7 +31,7 @@ void WavetableManager::build_bandlimited_saw(std::vector<double>& table, int tab
     double base_freq = (double)sample_rate_ / table_size;
     int max_harm = std::max(1, (int)std::floor((sample_rate_ / 2.0) / base_freq));
 
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < table_size; ++i) {
         double ph = (double)i / table_size;  // position 0..1
         double sum = 0.0;
@@ -48,7 +48,7 @@ void WavetableManager::build_bandlimited_saw(std::vector<double>& table, int tab
     double peak = 0.0;
     for (double s : table) peak = std::max(peak, std::abs(s));
     if (peak > 0.0) {
-        #pragma omp parallel for
+        // #pragma omp parallel for
         for (int i = 0; i < table_size; ++i) table[i] /= peak;
     }
 }
@@ -59,6 +59,7 @@ void WavetableManager::build_bandlimited_square(std::vector<double>& table, int 
     double base_freq = (double)sample_rate_ / table_size;
     int max_harm = std::max(1, (int)std::floor((sample_rate_ / 2.0) / base_freq));
 
+    // #pragma omp parallel for
     for (int i = 0; i < table_size; ++i) {
         double ph = (double)i / table_size;
         double sum = 0.0;
@@ -74,7 +75,7 @@ void WavetableManager::build_bandlimited_square(std::vector<double>& table, int 
     double peak = 0.0;
     for (double s : table) peak = std::max(peak, std::abs(s));
     if (peak > 0.0) {
-        #pragma omp parallel for
+        // #pragma omp parallel for
         for (int i = 0; i < table_size; ++i) table[i] /= peak;
     }
 }
@@ -85,6 +86,7 @@ void WavetableManager::build_bandlimited_triangle(std::vector<double>& table, in
     double base_freq = (double)sample_rate_ / table_size;
     int max_harm = std::max(1, (int)std::floor((sample_rate_ / 2.0) / base_freq));
 
+    // #pragma omp parallel for
     for (int i = 0; i < table_size; ++i) {
         double ph = (double)i / table_size;
         double sum = 0.0;
@@ -102,14 +104,14 @@ void WavetableManager::build_bandlimited_triangle(std::vector<double>& table, in
     double peak = 0.0;
     for (double s : table) peak = std::max(peak, std::abs(s));
     if (peak > 0.0) {
-        #pragma omp parallel for
+        // #pragma omp parallel for
         for (int i = 0; i < table_size; ++i) table[i] /= peak;
     }
 }
 
 void WavetableManager::build_sine(std::vector<double>& table, int table_size) {
     table.resize(table_size);
-    #pragma omp parallel for
+    // #pragma omp parallel for
     for (int i = 0; i < table_size; ++i) {
         double ph = (double)i / table_size;
         table[i] = std::sin(2.0 * M_PI * ph);
@@ -174,16 +176,14 @@ std::vector<double> WavetableManager::render(
     double phase_offset
 ) {
     std::vector<double> table_copy;
-    std::lock_guard<std::mutex> lock(mutex_);
 
-    // Add small sine if missing
-    if (!tables_.count(name)) {
-        std::vector<double> tmp;
-        build_sine(tmp, 2048);
-        tables_[name] = std::move(tmp);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!tables_.count(name)) return std::vector<double>(num_frames, 0.0);
+
+        table_copy = tables_[name];
     }
 
-    table_copy = tables_[name];
     int N = (int)table_copy.size();
 
     std::vector<double> out(num_frames);
@@ -191,7 +191,7 @@ std::vector<double> WavetableManager::render(
     double ph0 = start_phase + phase_offset;
     ph0 -= std::floor(ph0);
 
-    #pragma omp parallel for 
+    // #pragma omp parallel for 
     for (int i = 0; i < num_frames; ++i) {
         double ph = ph0 + i * phase_inc;
         ph -= std::floor(ph);
