@@ -6,10 +6,10 @@ void apply_hanning_window(std::vector<double>& buffer) {
     if (N == 0) return;
 
     // Parallelization is possible due to independency of every sample piece 
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int i = 0; i < N; ++i) {
         double window_val = 0.5 * (1 - std::cos(2.0 * M_PI * i / (N - 1.0)));
-        buffer[i] = window_val;
+        buffer[i] *= window_val;
     }
 }
 
@@ -17,7 +17,7 @@ std::vector<double> calculate_magnitude(fftw_complex* fft_output, int N) {
     int num_bins = N / 2 + 1;
     std::vector<double> magnitudes(num_bins);
 
-    // #pragma omp parallel for
+    #pragma omp parallel for
     for (int i = 0; i < num_bins; ++i) {
         double re = fft_output[i][0];
         double im = fft_output[i][1];

@@ -7,9 +7,9 @@ class Button(QWidget):
     toggled = pyqtSignal(bool)
 
     def __init__(self, parent=None, x=0, y=0, width=100, height=50,
-                 unpressed_path = "assets/button/unpressed.png",
-                 pressed_path = "assets/button/pressed.png",
-                 hover_path = "assets/button/hover.png",
+                 unpressed_path = "gui:assets/button/unpressed.png",
+                 pressed_path = "gui:assets/button/pressed.png",
+                 hover_path = "gui:assets/button/hover.png",
                  toggle = False):
         super().__init__(parent)
         self.setGeometry(x, y, width, height)

@@ -11,10 +11,13 @@ namespace py = pybind11;
 
 std::vector<double> calculate_spectrum_fftw(const std::vector<double>& audio_buffer);
 
-PYBIND11_MODULE(spectrogram_cpp, m) {
+PYBIND11_MODULE(spectrogram_vis_cpp, m) {
     m.doc() = "Spectrogram module";
     m.def("init_fftw", []() {
-        if (!init_fftw()) throw std::runtime_error("Failed to init FFTW threads");
+        if (!init_fftw()) {
+            throw std::runtime_error("Failed to init FFTW threads");
+        }
+        return true;
     }, "Init FFTW for multithreading");
 
     m.def("cleanup_fft", &cleanup_fftw, "Cleans up FFTW threads upon exit");

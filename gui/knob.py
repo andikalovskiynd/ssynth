@@ -12,7 +12,7 @@ class KnobCache:
         if cls._frames is None:
             cls._frames = []
             for i in range(total):
-                pix = QPixmap(f"assets/knob/frame_{i}.png")
+                pix = QPixmap(f"gui:assets/knob/frame_{i}.png")
                 cls._frames.append(pix)
 
     @classmethod

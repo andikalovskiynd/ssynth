@@ -1,165 +1,80 @@
 #include "wavetable.h"
+#include <fstream>
+#include <iostream>
 #include <algorithm>
-#include <cmath>
-#include <omp.h>
+#include <vector>
 
 WavetableManager::WavetableManager(int sample_rate) : sample_rate_(sample_rate) {}
-
 WavetableManager::~WavetableManager() {}
 
 inline double WavetableManager::lookup_linear(const std::vector<double>& table, double phase) {
     const int N = (int)table.size();
     if (N == 0) return 0.0;
-
-    // Ensure phase is in [0,1)
-    phase = phase - std::floor(phase);
-
-    double pos = phase * (double)N;           // position in [0, N)
-    double idx0_d = std::floor(pos);          // integer part
-    int i0 = (int)idx0_d % N;
-    if (i0 < 0) i0 += N;
-    int i1 = i0 + 1;
-    if (i1 >= N) i1 = 0;
-
-    double frac = pos - idx0_d;               // fractional part in [0,1)
-    return table[i0] * (1.0 - frac) + table[i1] * frac;
-}
-
-void WavetableManager::build_bandlimited_saw(std::vector<double>& table, int table_size) {
-    table.assign(table_size, 0.0);
-
-    double base_freq = (double)sample_rate_ / table_size;
-    int max_harm = std::max(1, (int)std::floor((sample_rate_ / 2.0) / base_freq));
-
-    // #pragma omp parallel for
-    for (int i = 0; i < table_size; ++i) {
-        double ph = (double)i / table_size;  // position 0..1
-        double sum = 0.0;
-
-        // Sum harmonics up to Nyquist
-        for (int j = 1; j <= max_harm; ++j) {
-            sum += (1.0 / j) * std::sin(2.0 * M_PI * j * ph);
-        }
-
-        table[i] = sum;
-    }
-
-    // Normalize 
-    double peak = 0.0;
-    for (double s : table) peak = std::max(peak, std::abs(s));
-    if (peak > 0.0) {
-        // #pragma omp parallel for
-        for (int i = 0; i < table_size; ++i) table[i] /= peak;
-    }
-}
-
-void WavetableManager::build_bandlimited_square(std::vector<double>& table, int table_size) {
-    table.assign(table_size, 0.0);
-
-    double base_freq = (double)sample_rate_ / table_size;
-    int max_harm = std::max(1, (int)std::floor((sample_rate_ / 2.0) / base_freq));
-
-    // #pragma omp parallel for
-    for (int i = 0; i < table_size; ++i) {
-        double ph = (double)i / table_size;
-        double sum = 0.0;
-
-        for (int j = 1; j <= max_harm; j += 2) {
-            sum += (1.0 / j) * std::sin(2.0 * M_PI * j * ph);   // odd harmonics
-        }
-
-        table[i] = sum;
-    }
-
-    // Normalize 
-    double peak = 0.0;
-    for (double s : table) peak = std::max(peak, std::abs(s));
-    if (peak > 0.0) {
-        // #pragma omp parallel for
-        for (int i = 0; i < table_size; ++i) table[i] /= peak;
-    }
-}
-
-void WavetableManager::build_bandlimited_triangle(std::vector<double>& table, int table_size) {
-    table.assign(table_size, 0.0);
-
-    double base_freq = (double)sample_rate_ / table_size;
-    int max_harm = std::max(1, (int)std::floor((sample_rate_ / 2.0) / base_freq));
-
-    // #pragma omp parallel for
-    for (int i = 0; i < table_size; ++i) {
-        double ph = (double)i / table_size;
-        double sum = 0.0;
-        int sign = 1;
-
-        for (int j = 1; j <= max_harm; j += 2) {
-            sum += sign * (1.0 / (j * j)) * std::sin(2.0 * M_PI * j * ph);    // For triangle sum odd harmonics with (1/k^2) and alternating sign
-            sign *= -1;
-        }
-
-        table[i] = sum;
-    }
-
-    // Normalize 
-    double peak = 0.0;
-    for (double s : table) peak = std::max(peak, std::abs(s));
-    if (peak > 0.0) {
-        // #pragma omp parallel for
-        for (int i = 0; i < table_size; ++i) table[i] /= peak;
-    }
-}
-
-void WavetableManager::build_sine(std::vector<double>& table, int table_size) {
-    table.resize(table_size);
-    // #pragma omp parallel for
-    for (int i = 0; i < table_size; ++i) {
-        double ph = (double)i / table_size;
-        table[i] = std::sin(2.0 * M_PI * ph);
-    }
-}
-
-// ============================================================================== //
-
-void WavetableManager::generate_sine(const std::string& name, int table_size) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<double> tbl;
-    build_sine(tbl, table_size);
-    tables_[name] = std::move(tbl);
-}
-
-void WavetableManager::generate_saw(const std::string& name, int table_size) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<double> tbl;
-    build_bandlimited_saw(tbl, table_size);
-    tables_[name] = std::move(tbl);
-}
-
-void WavetableManager::generate_square(const std::string& name, int table_size) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<double> tbl;
-    build_bandlimited_square(tbl, table_size);
-    tables_[name] = std::move(tbl);
-}
-
-void WavetableManager::generate_triangle(const std::string& name, int table_size) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<double> tbl;
-    build_bandlimited_triangle(tbl, table_size);
-    tables_[name] = std::move(tbl);
-}
-
-void WavetableManager::ensure_table(const std::string& name, int table_size) {
-    std::lock_guard<std::mutex> lock(mutex_);
     
-    if (tables_.count(name)) {
-        if ((int)tables_[name].size() == table_size) return;
+    double pos = phase * N;
+    int i0 = (int)pos;
+    double frac = pos - i0;
+    
+    int i1 = i0 + 1;
+    if (i1 >= N) i1 = 0; 
+
+    return table[i0] + frac * (table[i1] - table[i0]);
+}
+
+bool WavetableManager::load_wvt(const std::string& name, const std::string& filepath) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file.is_open()) {
+        std::cerr << "WavetableManager: Failed to open file " << filepath << std::endl;
+        return false;
     }
 
-    if (name == "sine") build_sine(tables_[name], table_size);
-    else if (name == "saw") build_bandlimited_saw(tables_[name], table_size);
-    else if (name == "square") build_bandlimited_square(tables_[name], table_size);
-    else if (name == "triangle") build_bandlimited_triangle(tables_[name], table_size);
-    else build_sine(tables_[name], table_size);      // fallback 
+    // 1. Read header
+    char magic[4];
+    file.read(magic, 4);
+    if (std::strncmp(magic, "WVT1", 4) != 0) {
+        std::cerr << "WavetableManager: Invalid magic bytes in " << filepath << std::endl;
+        return false;
+    }
+
+    int32_t num_mips = 0;
+    int32_t table_size = 0;
+    file.read(reinterpret_cast<char*>(&num_mips), sizeof(int32_t));
+    file.read(reinterpret_cast<char*>(&table_size), sizeof(int32_t));
+
+    if (num_mips <= 0 || table_size <= 0) {
+        std::cerr << "WavetableManager: Invalid header data (mips=" << num_mips << ", size=" << table_size << ")" << std::endl;
+        return false;
+    }
+
+    // 2. Prepare structure
+    WavetableSet wt;
+    wt.numMips = num_mips;
+    wt.baseSize = table_size;
+    wt.mips.resize(num_mips);
+
+    // 3. Read data
+    std::vector<float> temp_buffer(table_size);
+
+    for (int i = 0; i < num_mips; ++i) {
+        wt.mips[i].resize(table_size);
+        
+        file.read(reinterpret_cast<char*>(temp_buffer.data()), table_size * sizeof(float));
+        if (!file) {
+            std::cerr << "WavetableManager: Unexpected EOF in " << filepath << std::endl;
+            return false;
+        }
+
+        // Convert float -> double
+        for (int j = 0; j < table_size; ++j) {
+            wt.mips[i][j] = static_cast<double>(temp_buffer[j]);
+        }
+    }
+
+    tables_[name] = std::move(wt);
+    std::cout << "WavetableManager: Loaded '" << name << "' from " << filepath << std::endl;
+    return true;
 }
 
 bool WavetableManager::has_table(const std::string& name) {
@@ -167,36 +82,51 @@ bool WavetableManager::has_table(const std::string& name) {
     return tables_.count(name) > 0;
 }
 
-std::vector<double> WavetableManager::render(
+void WavetableManager::render(
     const std::string& name,
-    double start_phase,
+    double& current_phase, 
     double phase_inc,
     int num_frames,
     double amplitude,
-    double phase_offset
+    std::vector<double>& output_buffer
 ) {
-    std::vector<double> table_copy;
-
+    WavetableSet* wt = nullptr;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!tables_.count(name)) return std::vector<double>(num_frames, 0.0);
-
-        table_copy = tables_[name];
+        auto it = tables_.find(name);
+        if (it != tables_.end()) {
+            wt = &it->second;
+        }
     }
 
-    int N = (int)table_copy.size();
+    if (!wt || wt->mips.empty()) {
+        std::fill(output_buffer.begin(), output_buffer.begin() + num_frames, 0.0);
+        return;
+    }
 
-    std::vector<double> out(num_frames);
+    // Choose MIP-level (Anti-Aliasing)
+    int table_idx = 0;
+    if (phase_inc > 0.0) {
+        double step = phase_inc * wt->baseSize;
+        if (step >= 1.0) {
+            table_idx = (int)(std::log2(step)); 
+        }
+    }
 
-    double ph0 = start_phase + phase_offset;
-    ph0 -= std::floor(ph0);
+    if (table_idx < 0) table_idx = 0;
+    if (table_idx >= wt->numMips) table_idx = wt->numMips - 1;
 
-    // #pragma omp parallel for 
+    const std::vector<double>& selected_table = wt->mips[table_idx];
+
+    // Render itself
+    // TODO: Crossfading (interpolation between different tables)
+    
     for (int i = 0; i < num_frames; ++i) {
-        double ph = ph0 + i * phase_inc;
-        ph -= std::floor(ph);
-        out[i] = amplitude * lookup_linear(table_copy, ph);
+        output_buffer[i] = amplitude * lookup_linear(selected_table, current_phase);
+        
+        current_phase += phase_inc;
+        
+        if (current_phase >= 1.0) current_phase -= 1.0;
+        else if (current_phase < 0.0) current_phase += 1.0;
     }
-
-    return out;
 }
