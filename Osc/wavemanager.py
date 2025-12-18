@@ -2,6 +2,7 @@ import struct
 import numpy as np
 import math
 import os
+# from misc.logger import Log
 
 class WaveManager:
     def __init__(self, table_size=2048, sample_rate=44100):
@@ -12,18 +13,14 @@ class WaveManager:
 
     def _generate_additive(self, harmonics_weights):
         """
-        Generates a set of tables (MIP-chain) with additive synthesis
+        Generates a set of tables (MIP-chain) with additive synthesis, naturalizing by applying sigma-approximation
         harmonics_weights: A function that takes a harmonic number (k) and returns the amplitude
         """
         mips_data = []
-
         base_freq = self.sample_rate / self.table_size
         nyquist = self.sample_rate / 2.0
 
         for mip_level in range(self.num_mips):
-            # With every level we are getting an octave higher, so
-            # "virtual" frequency of the table doubles, and places 
-            # for harmonics shrinks respectively
             pitch_shift = 2 ** mip_level
             effective_freq = base_freq * pitch_shift
             
@@ -34,17 +31,23 @@ class WaveManager:
 
             for k in range(1, max_harmonic + 1):
                 amp = harmonics_weights(k)
+                
+                # SIGMA APPROXIMATION (Lanczos factor)
+                # To get rid of Gibbs effect (ringing) on the edges of wave
+                sigma = 1.0
+                if k > 1:
+                    x = np.pi * k / (max_harmonic + 1)
+                    sigma = np.sin(x) / x
+
                 if amp != 0:
-                    # phase = 2 * pi * k * t
-                    table += amp * np.sin(2 * np.pi * k * t)
+                    table += (amp * sigma) * np.sin(2 * np.pi * k * t)
 
             peak = np.max(np.abs(table))
             if peak > 1e-9:
                 table /= peak
             
             mips_data.append(table)
-            
-            print(f"  [MIP {mip_level}] Freq shift: {pitch_shift}x, Max Harm: {max_harmonic}")
+            print(f"  [MIP {mip_level}] Shift: {pitch_shift}x, MaxHarm: {max_harmonic} (Sigma Applied)")
 
         return mips_data
 
@@ -126,7 +129,6 @@ class WaveManager:
             mips_restored = np.split(data, num_mips)
             return mips_restored
 
-# --- Пример использования ---
 if __name__ == "__main__":
     manager = WaveManager(table_size=2048, sample_rate=44100)
     

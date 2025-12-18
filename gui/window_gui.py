@@ -32,7 +32,7 @@ class MainWindow(QMainWindow):
 
         if data is not None: 
             self.spectrogram_widget = SpectrogramWidget(data, sample_rate, parent=self)
-            self.spectrogram_widget.setGeometry(50, 50, 500, 167)
+            self.spectrogram_widget.setGeometry(400, 400, 500, 167)
             self.spectrogram_widget.show()
             print("DEBUG: Spectrogram widget created")
         else: 

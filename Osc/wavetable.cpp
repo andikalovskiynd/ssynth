@@ -82,6 +82,10 @@ bool WavetableManager::has_table(const std::string& name) {
     return tables_.count(name) > 0;
 }
 
+inline double interpolate(double y0, double y1, double frac) {
+    return y0 + frac * (y1 - y0);
+}
+
 void WavetableManager::render(
     const std::string& name,
     double& current_phase, 
@@ -104,29 +108,61 @@ void WavetableManager::render(
         return;
     }
 
-    // Choose MIP-level (Anti-Aliasing)
-    int table_idx = 0;
-    if (phase_inc > 0.0) {
-        double step = phase_inc * wt->baseSize;
-        if (step >= 1.0) {
-            table_idx = (int)(std::log2(step)); 
+    // MipMapping (Interpolation between MIP-levels)
+    // step = how much samples we process by one cycle
+    double step = phase_inc * wt->baseSize;
+    
+    // Calculate floating table idx 
+    // log2(step) gives neccesery octave
+    // Ex: step=1 -> idx=0. step=2 -> idx=1. step=4 -> idx=2.
+    double table_idx_float = 0.0;
+    if (step >= 1.0) {
+        table_idx_float = std::log2(step);
+    }
+    
+    if (table_idx_float < 0.0) table_idx_float = 0.0;
+    // -1.001 so there is always a "next" value to look up, except the edge
+    if (table_idx_float > wt->numMips - 1.001) table_idx_float = wt->numMips - 1.001;
+
+    int idx0 = (int)table_idx_float;
+    int idx1 = idx0 + 1;
+    if (idx1 >= wt->numMips) idx1 = wt->numMips - 1;
+
+    // Coefficient of mixing (for smoothness of note transitions)
+    double mix_mips = table_idx_float - idx0;
+
+    const std::vector<double>& table0 = wt->mips[idx0];
+    const std::vector<double>& table1 = wt->mips[idx1];
+
+    // Debug because there are currently some problems with rendering
+    static bool data_checked = false;
+    if (!data_checked && name == "saw") {
+        std::cout << "--- CHECKING SAW TABLE DATA (MIP " << idx0 << ") ---" << std::endl;
+        for (int k = 0; k < 10; ++k) {
+            std::cout << "[" << k << "] = " << table0[k] << std::endl;
         }
+        std::cout << "---------------------------------------------" << std::endl;
+        data_checked = true;
     }
 
-    if (table_idx < 0) table_idx = 0;
-    if (table_idx >= wt->numMips) table_idx = wt->numMips - 1;
-
-    const std::vector<double>& selected_table = wt->mips[table_idx];
-
-    // Render itself
-    // TODO: Crossfading (interpolation between different tables)
-    
     for (int i = 0; i < num_frames; ++i) {
-        output_buffer[i] = amplitude * lookup_linear(selected_table, current_phase);
+        // Read MIP from N-th level
+        double val0 = lookup_linear(table0, current_phase);
         
+        // Read MIP from N-th + 1 level
+        double val1 = lookup_linear(table1, current_phase);
+        
+        // Trilinear lookup 
+        double final_val = interpolate(val0, val1, mix_mips);
+
+        output_buffer[i] = amplitude * final_val;
+        
+        // Update phase
         current_phase += phase_inc;
         
-        if (current_phase >= 1.0) current_phase -= 1.0;
-        else if (current_phase < 0.0) current_phase += 1.0;
+        // Wrap
+        if (current_phase >= 1.0) {
+            current_phase -= std::floor(current_phase);
+        }
     }
 }

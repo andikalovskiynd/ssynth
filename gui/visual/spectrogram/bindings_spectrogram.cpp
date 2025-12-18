@@ -11,7 +11,7 @@ namespace py = pybind11;
 
 std::vector<double> calculate_spectrum_fftw(const std::vector<double>& audio_buffer);
 
-PYBIND11_MODULE(spectrogram_vis_cpp, m) {
+PYBIND11_MODULE(spectrogram_cpp, m) {
     m.doc() = "Spectrogram module";
     m.def("init_fftw", []() {
         if (!init_fftw()) {

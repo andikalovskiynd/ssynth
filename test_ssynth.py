@@ -8,6 +8,7 @@ from Osc.osc import Oscillator, Voice, VoiceEngine
 from Filter.filter import Filter
 from Filter.envelope import Envelope
 from gui.visual.visualizer import GLWidget
+from misc.logger import Log
 
 qt_plugins = "/Users/cyrep/Documents/python/ENTER/lib/python3.13/site-packages/PyQt6/Qt6/plugins"
 os.environ["QT_PLUGIN_PATH"] = qt_plugins
@@ -24,13 +25,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 GUI_DIR = PROJECT_ROOT / "gui"
 QDir.addSearchPath('gui', str(GUI_DIR))
-print(f"DEBUG: Added Qt search path for 'gui': {GUI_DIR}")
+Log.dbg(f"Added Qt search path for 'gui': {GUI_DIR}")
 
-osc1 = Oscillator(wave_type='sine', freq=440.0, amplitude=0.5, detune=0.0, phase_offset=0.0)
+osc1 = Oscillator(wave_type='sine', freq=0.0, amplitude=1.0, detune=0.0, phase_offset=0.0)
 osc2 = Oscillator(wave_type='sine', freq=3000.0, amplitude=0.0, detune=0.0, phase_offset=0.0)
 osc3 = Oscillator(wave_type='sine', freq=250.0, amplitude=0.0, detune=0.0, phase_offset=0.0)
 
-voice = Voice(freq=220.0)
+voice = Voice(freq=880.0)
 voice.oscillators = [osc1, osc2, osc3]
 voice.set_waveforms(['sine', 'sine', 'sine'])
 voice.set_pan(0.0)

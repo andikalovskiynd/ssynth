@@ -1,10 +1,11 @@
 import numpy as np
 import sys
 import os
+from misc.logger import Log
 
 CURRENT_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(CURRENT_FILE_DIR))
-BUILD_PATH = os.path.join(PROJECT_ROOT, "build")
+SSYNTH_ROOT = os.path.dirname(CURRENT_FILE_DIR)
+BUILD_PATH = os.path.join(SSYNTH_ROOT, "build")
 
 if os.path.exists(BUILD_PATH) and BUILD_PATH not in sys.path:
     sys.path.append(BUILD_PATH)
@@ -14,11 +15,11 @@ try:
     import wavetable_cpp
     wavetable_cpp.init(44100)
     WAVETABLE_AVAILABLE = True
-    print(f"DEBUG: Wavetable module loaded.")
+    Log.dbg("Wavetable module loaded")
 except ImportError:
-    print(f"WARNING: Wavetable module NOT found in {BUILD_PATH}. Using pure Python (slow).")
+    Log.warn(f"Wavetable module NOT found in {BUILD_PATH}. Using pure Python (slow)")
 except Exception as e:
-    print(f"ERROR: Failed to init wavetable module: {e}")
+    Log.err(f"Failed to init wavetable module: {e}")
 
 # ================================
 # =    Global Resource Manager   =
@@ -32,7 +33,7 @@ def init_resources():
     waveforms = ["saw", "square", "triangle", "sine"]
     
     if not os.path.exists(TABLES_DIR):
-        print(f" [!] Error: Directory {TABLES_DIR} does not exist.")
+        Log.err("Directory {TABLES_DIR} does not exist")
         return
 
     print(f"--- Loading Wavetables from: {TABLES_DIR} ---")
@@ -80,6 +81,7 @@ class Oscillator:
         else:
             self.use_wavetable = False
 
+    # Refactoring needed
     def process(self, num_frames: int):
         current_freq = self.freq + self.detune
         
@@ -99,7 +101,7 @@ class Oscillator:
                 return audio_block
 
             except Exception as e:
-                print(f"Error in C++ render: {e}. Fallback to Python.")
+                Log.err("Error in C++ render: {e}. Fallback to Python")
                 self.use_wavetable = False 
 
         # --- PYTHON FALLBACK (SLOW) ---
