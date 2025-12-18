@@ -1,85 +1,124 @@
-import numpy as np 
-import math 
+import numpy as np
 import sys
+import os
+from misc.logger import Log
 
-sys.path.append("/Users/cyrep/Documents/python/ssynth/build")
+CURRENT_FILE_DIR = os.path.dirname(os.path.abspath(__file__))
+SSYNTH_ROOT = os.path.dirname(CURRENT_FILE_DIR)
+BUILD_PATH = os.path.join(SSYNTH_ROOT, "build")
 
+if os.path.exists(BUILD_PATH) and BUILD_PATH not in sys.path:
+    sys.path.append(BUILD_PATH)
+
+WAVETABLE_AVAILABLE = False
 try:
     import wavetable_cpp
-    WAVETABLE_AVAILABLE = True
     wavetable_cpp.init(44100)
-except Exception:
-    WAVETABLE_AVAILABLE = False
-    print("WAVETABLE IS NOT IMPORTED")
+    WAVETABLE_AVAILABLE = True
+    Log.dbg("Wavetable module loaded")
+except ImportError:
+    Log.warn(f"Wavetable module NOT found in {BUILD_PATH}. Using pure Python (slow)")
+except Exception as e:
+    Log.err(f"Failed to init wavetable module: {e}")
+
+# ================================
+# =    Global Resource Manager   =
+# ================================
+
+def init_resources():
+    if not WAVETABLE_AVAILABLE:
+        return
+
+    TABLES_DIR = os.path.join(CURRENT_FILE_DIR, "tables")
+    waveforms = ["saw", "square", "triangle", "sine"]
+    
+    if not os.path.exists(TABLES_DIR):
+        Log.err("Directory {TABLES_DIR} does not exist")
+        return
+
+    print(f"--- Loading Wavetables from: {TABLES_DIR} ---")
+    for name in waveforms:
+        filename = f"{name}.wvt"
+        filepath = os.path.join(TABLES_DIR, filename)
+        
+        if os.path.exists(filepath):
+            success = wavetable_cpp.load_wvt(name, filepath)
+            if success:
+                print(f" [+] Loaded: {name}")
+            else:
+                print(f" [!] C++ failed to parse: {name}")
+        else:
+            print(f" [-] Not found: {filename}")
+    print("--------------------------------------------")
+
+init_resources()
+
 
 # ================================
 # =         Oscillator           =
 # ================================
 
 class Oscillator:
-    def __init__(self, wave_type='sine', freq=440.0, amplitude=1.0, sample_rate=44100, detune=0.0, phase_offset=0.0, table_size = 4096):
+    def __init__(self, wave_type='sine', freq=440.0, amplitude=1.0, sample_rate=44100, detune=0.0, phase_offset=0.0):
         self.wave_type = wave_type
         self.freq = freq
         self.amplitude = amplitude
         self.sample_rate = sample_rate
-        self.phase = 0.0    # normalized phase in [0.0, 1.0)
-        self.detune = detune
-        self.phase_offset = phase_offset
-        self.table_size = table_size
+        self.detune = detune 
+        
+        self.phase = phase_offset % 1.0
+        
+        self.use_wavetable = False
+        self._check_wavetable_availability()
 
-        if WAVETABLE_AVAILABLE:
-            # to ensure that table exists for this waveform name
-            try:
-                wavetable_cpp.init(self.sample_rate)
-                wavetable_cpp.generate_table(self.wave_type, self.table_size)
-            except Exception:
-                pass
-    
+    def set_wave_type(self, wave_type: str):
+        self.wave_type = wave_type
+        self._check_wavetable_availability()
+
+    def _check_wavetable_availability(self):
+        if WAVETABLE_AVAILABLE and wavetable_cpp.has_table(self.wave_type):
+            self.use_wavetable = True
+        else:
+            self.use_wavetable = False
+
+    # Refactoring needed
     def process(self, num_frames: int):
-        # phase increment per sample (fraction of cycle)
-        phase_inc = (self.freq + self.detune) / self.sample_rate
+        current_freq = self.freq + self.detune
+        
+        phase_inc = current_freq / self.sample_rate
 
-        if WAVETABLE_AVAILABLE:
+        # --- C++ FAST PATH ---
+        if self.use_wavetable:
             try:
-                start_phase = self.phase + self.phase_offset
-                arr = wavetable_cpp.render(self.wave_type, float(start_phase), float(phase_inc), int(num_frames), float(self.amplitude), float(0.0))
-                self.phase = (self.phase + phase_inc * num_frames) % 1.0
-                print("\n   WAVETABLE IS AVAILABLE AT PROCESS")
-                return arr
-            except Exception:
-                # fallback to origin full python code
-                print("\n FAILBACK ON PROCESS IN OSC!!!")
-                pass
+                audio_block, next_phase = wavetable_cpp.render(
+                    self.wave_type, 
+                    float(self.phase), 
+                    float(phase_inc), 
+                    int(num_frames), 
+                    float(self.amplitude)
+                )
+                self.phase = next_phase
+                return audio_block
 
-        """ 
-        IF WAVE TABLE IS NOT AVAILABLE
-        Generates array with num_frames samples
-            It is practically convinient to keep phase not in seconds but in normalized form, 
-            in [0,1) as fraction of cycle. So every step is: dph = f / f_s 
-            And sine, for example is x[n] = Asin(2pi * ph_n), ph_n = ph_n-1 + dph.
-        """
+            except Exception as e:
+                Log.err("Error in C++ render: {e}. Fallback to Python")
+                self.use_wavetable = False 
 
-        # array of phases for each sample
-        phases = (self.phase + self.phase_offset + phase_inc * np.arange(num_frames)) % 1.0
-
+        # --- PYTHON FALLBACK (SLOW) ---
+        phases = (self.phase + np.arange(num_frames) * phase_inc) % 1.0
+        
         if self.wave_type == 'sine':
-            out = np.sin(2 * np.pi * phases)   # x[n] = A * sin (2pi * ph_n), ph_n in [0,1)
-
+            out = np.sin(2 * np.pi * phases)
         elif self.wave_type == 'square':
-            out = np.sign(np.sin(2 * np.pi * phases))  # x[n] = A * sign (sine)
-
+            out = np.sign(np.sin(2 * np.pi * phases))
         elif self.wave_type == 'saw':
-            out = 2.0 * (phases - 0.5)    # x[n] = 2(ph_n - 0.5)
-
+            out = 2.0 * phases - 1.0
         elif self.wave_type == 'triangle':
-            out = 2.0 * np.abs(2.0 * (phases - np.floor(phases + 0.5))) - 1.0    # x[n] = 2 * abs(2(ph_n - floor(ph_n + 0.5))) - 1
-
+            out = 2.0 * np.abs(2.0 * (phases - 0.5)) - 1.0
         else:
             out = np.zeros(num_frames)
 
-        # update phase for next calls 
-        self.phase = (self.phase + phase_inc * num_frames) % 1.0
-
+        self.phase = (self.phase + num_frames * phase_inc) % 1.0
         return self.amplitude * out
 
 
@@ -88,48 +127,49 @@ class Oscillator:
 # ================================
 
 class Voice:
-    """
-    One voice (up to 3 oscs)
-    """
     def __init__(self, freq: float, sample_rate=44100):
+        self.freq = freq
+        self.sample_rate = sample_rate
+        
         self.oscillators = [
-            Oscillator(freq=freq, sample_rate=sample_rate),
-            Oscillator(freq=freq, sample_rate=sample_rate),
             Oscillator(freq=freq, sample_rate=sample_rate)
         ]
+        
         self.is_active = True
-        self.pan = 0.0  # -1.0 = left; 0.0 = center; 1.0 = right
-    
-    def set_waveforms(self, waveforms):
-        """ Set waveform for each osc """
-        for osc, wf in zip(self.oscillators, waveforms):
-            osc.wave_type = wf
-    
-    def set_amplitudes(self, amps):
-        """ Set amplitude for each osc """
-        for osc, amp in zip(self.oscillators, amps):
-            osc.amplitude = amp
+        self.pan = 0.0 
+        self.gain = 1.0 
 
-    def set_pan(self, pan):
-        """ Set panoram """
+    def set_waveforms(self, waveforms: list):
+        for i, wf in enumerate(waveforms):
+            if i < len(self.oscillators):
+                self.oscillators[i].set_wave_type(wf)
+    
+    def set_pan(self, pan: float):
         self.pan = np.clip(pan, -1.0, 1.0)
 
-    def process(self, num_frames):
-        """ Sum signals from all of oscs depending on panoram """
-        if not self.is_active:
-            return np.zeros(num_frames)
+    def process(self, num_frames: int):
+        if not self.is_active or not self.oscillators:
+            return np.zeros((num_frames, 2))
         
-        # mix = sum(osc.process(num_frames) for osc in self.oscillators)
-        # return mix / len(self.oscillators)
+        mono_mix = np.zeros(num_frames)
+        for osc in self.oscillators:
+            osc.freq = self.freq 
+            mono_mix += osc.process(num_frames)
+            
+        if len(self.oscillators) > 0:
+            mono_mix /= len(self.oscillators)
+        
+        mono_mix *= self.gain
 
-        mono = sum(osc.process(num_frames) for osc in self.oscillators)
-        mono /= len(self.oscillators)
+        # Pan -1 -> Left=1, Right=0
+        # Pan  0 -> Left=0.707, Right=0.707
+        # Pan  1 -> Left=0, Right=1
+        angle = (self.pan + 1.0) * (np.pi / 4.0)
+        left_gain = np.cos(angle)
+        right_gain = np.sin(angle)
 
-        # balanced stereo gain
-        left_gain = np.cos((np.pi / 4) * (1 + self.pan))
-        right_gain = np.sin((np.pi / 4) * (1 + self.pan))
-
-        stereo = np.stack([mono * left_gain, mono * right_gain], axis=-1)
+        stereo = np.column_stack((mono_mix * left_gain, mono_mix * right_gain))
+        
         return stereo
 
 
@@ -138,29 +178,39 @@ class Voice:
 # ================================
     
 class VoiceEngine:
-    """ Manages active voices """
     def __init__(self, max_voices=8, sample_rate=44100, master_gain=1.0):
-        self.voices = []
+        self.voices = [] 
         self.max_voices = max_voices
         self.sample_rate = sample_rate 
         self.master_gain = master_gain
 
-    def note_on(self, freq):
-        """ Add new voice """
+    def note_on(self, freq, velocity=1.0):
         if len(self.voices) >= self.max_voices:
-            self.voices.pop()
+            self.voices.pop(0) 
+            
         v = Voice(freq=freq, sample_rate=self.sample_rate)
+        v.gain = velocity
+        v.oscillators = [
+            Oscillator(wave_type='saw', freq=freq, sample_rate=self.sample_rate),
+        ]
         self.voices.append(v)
 
     def note_off(self, freq):
-        """ Delete active voice with specified frequency """
         for v in self.voices:
-            if abs(v.oscillators[0].freq - freq) < 1e-3:
+            if abs(v.freq - freq) < 0.1:
                 v.is_active = False
 
     def process(self, num_frames):
-        """ Sum signals from all of active voices """
+        self.voices = [v for v in self.voices if v.is_active]
+
         if not self.voices:
-            return np.zeros(num_frames)
-        mix = sum(v.process(num_frames) for v in self.voices)
-        return (mix / len(self.voices)) * self.master_gain
+            return np.zeros((num_frames, 2))
+
+        final_mix = np.zeros((num_frames, 2))
+        for v in self.voices:
+            final_mix += v.process(num_frames)
+            
+        final_mix *= self.master_gain
+        np.clip(final_mix, -1.0, 1.0, out=final_mix)
+        
+        return final_mix
